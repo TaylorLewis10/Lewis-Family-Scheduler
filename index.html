@@ -20,8 +20,10 @@
 </head>
 <body>
 <div id="root"></div>
+
 <script type="text/babel">
 const { useState, useEffect, useRef } = React;
+
 const firebaseConfig = {
   apiKey: "AIzaSyCwRonvhHKmdky3frm_zysJ2-mAe-MrNaQ",
   authDomain: "lewis-family-scheduler.firebaseapp.com",
@@ -30,133 +32,914 @@ const firebaseConfig = {
   messagingSenderId: "358535770853",
   appId: "1:358535770853:web:3c7df6cdda4588925c9a0c",
 };
+
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
+
 const CAREGIVERS_DEFAULT = [
   { id: "c1", name: "Gina",  color: "#E8A87C", light: "#FDF0E6" },
   { id: "c2", name: "Paula", color: "#85C1A3", light: "#E8F5EE" },
   { id: "c3", name: "Vicki", color: "#7EB8D4", light: "#E6F4FA" },
 ];
+
 const CHILDREN_DEFAULT = ["Henry", "Charles"];
 const DAYS   = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
-function getDaysInMonth(y,m){return new Date(y,m+1,0).getDate();}
-function getFirstDay(y,m){return new Date(y,m,1).getDay();}
-function isWeekend(y,m,d){const w=new Date(y,m,d).getDay();return w===0||w===6;}
-function App(){
-  const today=new Date();
-  const [year,setYear]=useState(today.getFullYear());
-  const [month,setMonth]=useState(today.getMonth());
-  const [schedule,setSchedule]=useState({});
-  const [paulaOut,setPaulaOut]=useState({});
-  const [taylorIn,setTaylorIn]=useState({});
-  const [caregivers,setCaregivers]=useState(CAREGIVERS_DEFAULT);
-  const [children,setChildren]=useState(CHILDREN_DEFAULT);
-  const [modal,setModal]=useState(null);
-  const [settingsOpen,setSettingsOpen]=useState(false);
-  const [printView,setPrintView]=useState(false);
-  const [syncing,setSyncing]=useState(false);
-  const [connected,setConnected]=useState(false);
-  const unsubRefs=useRef([]);
-  const mk=`${year}-${String(month+1).padStart(2,"0")}`;
-  useEffect(()=>{
-    unsubRefs.current.forEach(u=>u());
-    unsubRefs.current=[];
-    const s1=db.collection("schedules").doc(mk).onSnapshot(snap=>{setSchedule(snap.exists?snap.data().days||{}:{});setConnected(true);});
-    const s2=db.collection("paulaOut").doc(mk).onSnapshot(snap=>setPaulaOut(snap.exists?snap.data().days||{}:{}));
-    const s3=db.collection("taylorIn").doc(mk).onSnapshot(snap=>setTaylorIn(snap.exists?snap.data().days||{}:{}));
-    const s4=db.collection("settings").doc("caregivers").onSnapshot(snap=>{if(snap.exists)setCaregivers(snap.data().list||CAREGIVERS_DEFAULT);});
-    const s5=db.collection("settings").doc("children").onSnapshot(snap=>{if(snap.exists)setChildren(snap.data().list||CHILDREN_DEFAULT);});
-    unsubRefs.current=[s1,s2,s3,s4,s5];
-    return()=>unsubRefs.current.forEach(u=>u());
-  },[year,month]);
-  const save=async(col,id,data)=>{setSyncing(true);try{await db.collection(col).doc(id).set(data,{merge:true});}catch(e){console.error(e);}setSyncing(false);};
-  const updateDay=(day,field,value)=>{const u={...schedule,[day]:{...(schedule[day]||{}),[field]:value}};setSchedule(u);save("schedules",mk,{days:u});};
-  const clearDay=(day)=>{const u={...schedule};delete u[day];setSchedule(u);save("schedules",mk,{days:u});};
-  const togglePaula=(day)=>{const u={...paulaOut,[day]:!paulaOut[day]};setPaulaOut(u);save("paulaOut",mk,{days:u});};
-  const toggleTaylor=(day)=>{const u={...taylorIn,[day]:!taylorIn[day]};setTaylorIn(u);save("taylorIn",mk,{days:u});};
-  const saveCaregivers=(list)=>{setCaregivers(list);save("settings","caregivers",{list});};
-  const saveChildren=(list)=>{setChildren(list);save("settings","children",{list});};
-  const prevMonth=()=>{if(month===0){setYear(y=>y-1);setMonth(11);}else setMonth(m=>m-1);};
-  const nextMonth=()=>{if(month===11){setYear(y=>y+1);setMonth(0);}else setMonth(m=>m+1);};
-  const daysInMonth=getDaysInMonth(year,month);
-  const firstDay=getFirstDay(year,month);
-  const cells=Array(firstDay).fill(null).concat(Array.from({length:daysInMonth},(_,i)=>i+1));
-  while(cells.length%7!==0)cells.push(null);
-  const dayCG=(day)=>{const e=schedule[day];if(!e||!e.caregiverId)return null;return caregivers.find(c=>c.id===e.caregiverId)||null;};
-  const cgSummary=caregivers.map(cg=>({...cg,days:Object.values(schedule).filter(e=>e.caregiverId===cg.id).length}));
-  const taylorDays=Object.keys(taylorIn).filter(k=>taylorIn[k]).length;
-  const paulaDays=Object.keys(paulaOut).filter(k=>paulaOut[k]).length;
-  if(printView)return <PrintView year={year} month={month} schedule={schedule} paulaOut={paulaOut} taylorIn={taylorIn} caregivers={caregivers} children={children} cells={cells} dayCG={dayCG} onClose={()=>setPrintView(false)}/>;
-  return(
-    <div style={{minHeight:"100vh",background:"#F7F3EE",paddingBottom:60}}>
-      <div style={{background:"#2C2C2C",padding:"18px 20px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-        <div><div style={{color:"#E8A87C",fontSize:10,letterSpacing:4,textTransform:"uppercase",marginBottom:2}}>Lewis Family</div><div style={{color:"#fff",fontSize:20,fontWeight:"bold"}}>Childcare Planner</div></div>
-        <div style={{display:"flex",gap:8,alignItems:"center"}}>
-          <div style={{display:"flex",alignItems:"center",gap:5}}><div style={{width:8,height:8,borderRadius:"50%",background:syncing?"#F0C040":connected?"#5CB85C":"#CCC"}}/><span style={{fontSize:10,color:"#888"}}>{syncing?"Saving…":connected?"Live":"Connecting…"}</span></div>
-          <button onClick={()=>setPrintView(true)} style={{background:"none",border:"1.5px solid #E8A87C",color:"#E8A87C",borderRadius:8,padding:"6px 13px",cursor:"pointer",fontSize:11}}>🖨 PDF</button>
-          <button onClick={()=>setSettingsOpen(true)} style={{background:"none",border:"1.5px solid #555",color:"#ccc",borderRadius:8,padding:"6px 13px",cursor:"pointer",fontSize:11}}>⚙ Settings</button>
+
+function getDaysInMonth(y, m) {
+  return new Date(y, m + 1, 0).getDate();
+}
+
+function getFirstDay(y, m) {
+  return new Date(y, m, 1).getDay();
+}
+
+function isWeekend(y, m, d) {
+  const w = new Date(y, m, d).getDay();
+  return w === 0 || w === 6;
+}
+
+function App() {
+  const today = new Date();
+  const [year, setYear] = useState(today.getFullYear());
+  const [month, setMonth] = useState(today.getMonth());
+  const [schedule, setSchedule] = useState({});
+  const [paulaOut, setPaulaOut] = useState({});
+  const [taylorIn, setTaylorIn] = useState({});
+  const [caregivers, setCaregivers] = useState(CAREGIVERS_DEFAULT);
+  const [children, setChildren] = useState(CHILDREN_DEFAULT);
+  const [modal, setModal] = useState(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [printView, setPrintView] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [connected, setConnected] = useState(false);
+  const unsubRefs = useRef([]);
+
+  const mk = `${year}-${String(month + 1).padStart(2, "0")}`;
+
+  useEffect(() => {
+    unsubRefs.current.forEach(u => u());
+    unsubRefs.current = [];
+
+    const s1 = db.collection("schedules").doc(mk).onSnapshot(snap => {
+      setSchedule(snap.exists ? snap.data().days || {} : {});
+      setConnected(true);
+    });
+
+    const s2 = db.collection("paulaOut").doc(mk).onSnapshot(snap =>
+      setPaulaOut(snap.exists ? snap.data().days || {} : {})
+    );
+
+    const s3 = db.collection("taylorIn").doc(mk).onSnapshot(snap =>
+      setTaylorIn(snap.exists ? snap.data().days || {} : {})
+    );
+
+    const s4 = db.collection("settings").doc("caregivers").onSnapshot(snap => {
+      if (snap.exists) setCaregivers(snap.data().list || CAREGIVERS_DEFAULT);
+    });
+
+    const s5 = db.collection("settings").doc("children").onSnapshot(snap => {
+      if (snap.exists) setChildren(snap.data().list || CHILDREN_DEFAULT);
+    });
+
+    unsubRefs.current = [s1, s2, s3, s4, s5];
+
+    return () => unsubRefs.current.forEach(u => u());
+  }, [year, month]);
+
+  const save = async (col, id, data) => {
+    setSyncing(true);
+    try {
+      await db.collection(col).doc(id).set(data, { merge: true });
+    } catch (e) {
+      console.error(e);
+    }
+    setSyncing(false);
+  };
+
+  const updateDay = (day, field, value) => {
+    const u = { ...schedule, [day]: { ...(schedule[day] || {}), [field]: value } };
+    setSchedule(u);
+    save("schedules", mk, { days: u });
+  };
+
+  const clearDay = (day) => {
+    const u = { ...schedule };
+    delete u[day];
+    setSchedule(u);
+    save("schedules", mk, { days: u });
+  };
+
+  const togglePaula = (day) => {
+    const u = { ...paulaOut, [day]: !paulaOut[day] };
+    setPaulaOut(u);
+    save("paulaOut", mk, { days: u });
+  };
+
+  const toggleTaylor = (day) => {
+    const u = { ...taylorIn, [day]: !taylorIn[day] };
+    setTaylorIn(u);
+    save("taylorIn", mk, { days: u });
+  };
+
+  const saveCaregivers = (list) => {
+    setCaregivers(list);
+    save("settings", "caregivers", { list });
+  };
+
+  const saveChildren = (list) => {
+    setChildren(list);
+    save("settings", "children", { list });
+  };
+
+  const prevMonth = () => {
+    if (month === 0) {
+      setYear(y => y - 1);
+      setMonth(11);
+    } else {
+      setMonth(m => m - 1);
+    }
+  };
+
+  const nextMonth = () => {
+    if (month === 11) {
+      setYear(y => y + 1);
+      setMonth(0);
+    } else {
+      setMonth(m => m + 1);
+    }
+  };
+
+  const daysInMonth = getDaysInMonth(year, month);
+  const firstDay = getFirstDay(year, month);
+  const cells = Array(firstDay).fill(null).concat(
+    Array.from({ length: daysInMonth }, (_, i) => i + 1)
+  );
+
+  while (cells.length % 7 !== 0) cells.push(null);
+
+  const dayCG = (day) => {
+    const e = schedule[day];
+    if (!e || !e.caregiverId) return null;
+    return caregivers.find(c => c.id === e.caregiverId) || null;
+  };
+
+  const cgSummary = caregivers.map(cg => ({
+    ...cg,
+    days: Object.values(schedule).filter(e => e.caregiverId === cg.id).length
+  }));
+
+  const taylorDays = Object.keys(taylorIn).filter(k => taylorIn[k]).length;
+  const paulaDays = Object.keys(paulaOut).filter(k => paulaOut[k]).length;
+
+  if (printView) {
+    return (
+      <PrintView
+        year={year}
+        month={month}
+        schedule={schedule}
+        paulaOut={paulaOut}
+        taylorIn={taylorIn}
+        caregivers={caregivers}
+        children={children}
+        cells={cells}
+        dayCG={dayCG}
+        onClose={() => setPrintView(false)}
+      />
+    );
+  }
+
+  return (
+    <div style={{ minHeight: "100vh", background: "#F7F3EE", paddingBottom: 60 }}>
+      <div style={{ background: "#2C2C2C", padding: "18px 20px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div>
+          <div style={{ color: "#E8A87C", fontSize: 10, letterSpacing: 4, textTransform: "uppercase", marginBottom: 2 }}>
+            Lewis Family
+          </div>
+          <div style={{ color: "#fff", fontSize: 20, fontWeight: "bold" }}>
+            Childcare Planner
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+            <div style={{ width: 8, height: 8, borderRadius: "50%", background: syncing ? "#F0C040" : connected ? "#5CB85C" : "#CCC" }} />
+            <span style={{ fontSize: 10, color: "#888" }}>
+              {syncing ? "Saving…" : connected ? "Live" : "Connecting…"}
+            </span>
+          </div>
+
+          <button
+            onClick={() => setPrintView(true)}
+            style={{ background: "none", border: "1.5px solid #E8A87C", color: "#E8A87C", borderRadius: 8, padding: "6px 13px", cursor: "pointer", fontSize: 11 }}
+          >
+            🖨 PDF
+          </button>
+
+          <button
+            onClick={() => setSettingsOpen(true)}
+            style={{ background: "none", border: "1.5px solid #555", color: "#ccc", borderRadius: 8, padding: "6px 13px", cursor: "pointer", fontSize: 11 }}
+          >
+            ⚙ Settings
+          </button>
         </div>
       </div>
-      <div style={{background:"#E8F5EE",borderBottom:"1px solid #C5E0CE",padding:"7px 20px",display:"flex",alignItems:"center",gap:8}}><span style={{fontSize:12}}>🔥</span><span style={{fontSize:11,color:"#2D7A4F"}}>Live sync — changes instantly visible to everyone</span></div>
-      <div style={{background:"#fff",borderBottom:"1px solid #E8E2DA",padding:"10px 20px",display:"flex",gap:12,flexWrap:"wrap",alignItems:"center"}}>
-        {cgSummary.map(cg=><div key={cg.id} style={{display:"flex",alignItems:"center",gap:5}}><div style={{width:9,height:9,borderRadius:"50%",background:cg.color}}/><span style={{fontSize:11,color:"#444"}}>{cg.name} <span style={{color:"#BBB"}}>({cg.days}d)</span></span></div>)}
-        <div style={{width:1,background:"#E8E2DA",height:14}}/>
-        <div style={{display:"flex",alignItems:"center",gap:5}}><div style={{width:9,height:9,borderRadius:2,background:"#5B8CCC"}}/><span style={{fontSize:11,color:"#444"}}>Taylor In Office <span style={{color:"#BBB"}}>({taylorDays}d)</span></span></div>
-        <div style={{display:"flex",alignItems:"center",gap:5}}><div style={{width:9,height:9,borderRadius:2,background:"#C97B7B"}}/><span style={{fontSize:11,color:"#444"}}>Paula in Tampa <span style={{color:"#BBB"}}>({paulaDays}d)</span></span></div>
-        <div style={{display:"flex",alignItems:"center",gap:5}}><div style={{width:9,height:9,borderRadius:2,background:"#C8B8E8"}}/><span style={{fontSize:11,color:"#444"}}>Weekend</span></div>
+
+      <div style={{ background: "#E8F5EE", borderBottom: "1px solid #C5E0CE", padding: "7px 20px", display: "flex", alignItems: "center", gap: 8 }}>
+        <span style={{ fontSize: 12 }}>🔥</span>
+        <span style={{ fontSize: 11, color: "#2D7A4F" }}>
+          Live sync — changes instantly visible to everyone
+        </span>
       </div>
-      <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:22,padding:"18px 20px 8px"}}>
-        <button onClick={prevMonth} style={{background:"none",border:"none",fontSize:20,cursor:"pointer",color:"#666"}}>‹</button>
-        <div style={{textAlign:"center"}}><div style={{fontSize:24,fontWeight:"bold",color:"#2C2C2C"}}>{MONTHS[month]}</div><div style={{fontSize:12,color:"#999"}}>{year}</div></div>
-        <button onClick={nextMonth} style={{background:"none",border:"none",fontSize:20,cursor:"pointer",color:"#666"}}>›</button>
-      </div>
-      <div style={{maxWidth:980,margin:"0 auto",padding:"0 10px"}}>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(7, 1fr)",gap:4,marginBottom:4}}>
-          {DAYS.map(d=><div key={d} style={{textAlign:"center",fontSize:10,letterSpacing:2,color:"#BBB",textTransform:"uppercase",padding:"5px 0"}}>{d}</div>)}
+
+      <div style={{ background: "#fff", borderBottom: "1px solid #E8E2DA", padding: "10px 20px", display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+        {cgSummary.map(cg => (
+          <div key={cg.id} style={{ display: "flex", alignItems: "center", gap: 5 }}>
+            <div style={{ width: 9, height: 9, borderRadius: "50%", background: cg.color }} />
+            <span style={{ fontSize: 11, color: "#444" }}>
+              {cg.name} <span style={{ color: "#BBB" }}>({cg.days}d)</span>
+            </span>
+          </div>
+        ))}
+
+        <div style={{ width: 1, background: "#E8E2DA", height: 14 }} />
+
+        <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+          <div style={{ width: 9, height: 9, borderRadius: 2, background: "#5B8CCC" }} />
+          <span style={{ fontSize: 11, color: "#444" }}>
+            Taylor In Office <span style={{ color: "#BBB" }}>({taylorDays}d)</span>
+          </span>
         </div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(7, 1fr)",gap:4}}>
-          {cells.map((day,i)=>{
-            if(!day)return <div key={`e-${i}`}/>;
-            const weekend=isWeekend(year,month,day);
-            const cg=!weekend?dayCG(day):null;
-            const entry=schedule[day]||{};
-            const isPaulaOut=!!paulaOut[day];
-            const isTaylorIn=!!taylorIn[day];
-            const isToday=day===today.getDate()&&month===today.getMonth()&&year===today.getFullYear();
-            let bg="#fff",borderColor="#E8E2DA";
-            if(weekend){bg="#F8F5FF";borderColor="#D4C8EE";}
-            else if(cg){bg=cg.light;borderColor=cg.color+"66";}
-            return(
-              <div key={day} onClick={()=>setModal({day})} style={{background:bg,border:isToday?"2px solid #E8A87C":`1.5px solid ${borderColor}`,borderRadius:8,padding:"6px 6px 5px",cursor:"pointer",minHeight:78,transition:"transform 0.1s, box-shadow 0.1s",boxShadow:"0 1px 3px rgba(0,0,0,0.04)"}}
-                onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-2px)";e.currentTarget.style.boxShadow="0 4px 12px rgba(0,0,0,0.1)";}}
-                onMouseLeave={e=>{e.currentTarget.style.transform="none";e.currentTarget.style.boxShadow="0 1px 3px rgba(0,0,0,0.04)";}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:2}}>
-                  <span style={{fontSize:11,fontWeight:isToday?"bold":"normal",color:isToday?"#E8A87C":weekend?"#9B7EC8":"#777"}}>{day}</span>
-                  <div style={{display:"flex",gap:2}}>
-                    {isTaylorIn&&!weekend&&<div style={{width:6,height:6,borderRadius:1,background:"#5B8CCC"}}/>}
-                    {isPaulaOut&&!weekend&&<div style={{width:6,height:6,borderRadius:1,background:"#C97B7B"}}/>}
+
+        <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+          <div style={{ width: 9, height: 9, borderRadius: 2, background: "#C97B7B" }} />
+          <span style={{ fontSize: 11, color: "#444" }}>
+            Paula in Tampa <span style={{ color: "#BBB" }}>({paulaDays}d)</span>
+          </span>
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+          <div style={{ width: 9, height: 9, borderRadius: 2, background: "#C8B8E8" }} />
+          <span style={{ fontSize: 11, color: "#444" }}>Weekend</span>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 22, padding: "18px 20px 8px" }}>
+        <button onClick={prevMonth} style={{ background: "none", border: "none", fontSize: 20, cursor: "pointer", color: "#666" }}>
+          ‹
+        </button>
+
+        <div style={{ textAlign: "center" }}>
+          <div style={{ fontSize: 24, fontWeight: "bold", color: "#2C2C2C" }}>
+            {MONTHS[month]}
+          </div>
+          <div style={{ fontSize: 12, color: "#999" }}>{year}</div>
+        </div>
+
+        <button onClick={nextMonth} style={{ background: "none", border: "none", fontSize: 20, cursor: "pointer", color: "#666" }}>
+          ›
+        </button>
+      </div>
+
+      <div style={{ maxWidth: 980, margin: "0 auto", padding: "0 10px" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4, marginBottom: 4 }}>
+          {DAYS.map(d => (
+            <div key={d} style={{ textAlign: "center", fontSize: 10, letterSpacing: 2, color: "#BBB", textTransform: "uppercase", padding: "5px 0" }}>
+              {d}
+            </div>
+          ))}
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4 }}>
+          {cells.map((day, i) => {
+            if (!day) return <div key={`e-${i}`} />;
+
+            const weekend = isWeekend(year, month, day);
+            const cg = !weekend ? dayCG(day) : null;
+            const entry = schedule[day] || {};
+            const isPaulaOut = !!paulaOut[day];
+            const isTaylorIn = !!taylorIn[day];
+            const isToday =
+              day === today.getDate() &&
+              month === today.getMonth() &&
+              year === today.getFullYear();
+
+            let bg = "#fff";
+            let borderColor = "#E8E2DA";
+
+            if (weekend) {
+              bg = "#F8F5FF";
+              borderColor = "#D4C8EE";
+            } else if (cg) {
+              bg = cg.light;
+              borderColor = cg.color + "66";
+            }
+
+            return (
+              <div
+                key={day}
+                onClick={() => setModal({ day })}
+                style={{
+                  background: bg,
+                  border: isToday ? "2px solid #E8A87C" : `1.5px solid ${borderColor}`,
+                  borderRadius: 8,
+                  padding: "6px 6px 5px",
+                  cursor: "pointer",
+                  minHeight: 78,
+                  transition: "transform 0.1s, box-shadow 0.1s",
+                  boxShadow: "0 1px 3px rgba(0,0,0,0.04)"
+                }}
+                onMouseEnter={e => {
+                  e.currentTarget.style.transform = "translateY(-2px)";
+                  e.currentTarget.style.boxShadow = "0 4px 12px rgba(0,0,0,0.1)";
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.transform = "none";
+                  e.currentTarget.style.boxShadow = "0 1px 3px rgba(0,0,0,0.04)";
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 2 }}>
+                  <span style={{ fontSize: 11, fontWeight: isToday ? "bold" : "normal", color: isToday ? "#E8A87C" : weekend ? "#9B7EC8" : "#777" }}>
+                    {day}
+                  </span>
+
+                  <div style={{ display: "flex", gap: 2 }}>
+                    {isTaylorIn && !weekend && <div style={{ width: 6, height: 6, borderRadius: 1, background: "#5B8CCC" }} />}
+                    {isPaulaOut && !weekend && <div style={{ width: 6, height: 6, borderRadius: 1, background: "#C97B7B" }} />}
                   </div>
                 </div>
-                {!weekend&&cg&&<div style={{fontSize:10,fontWeight:"bold",color:cg.color}}>{cg.name}</div>}
-                {!weekend&&!cg&&<div style={{fontSize:9,color:"#DDD"}}>—</div>}
-                {!weekend&&entry.kids&&entry.kids.length>0&&<div style={{fontSize:9,color:"#999",marginTop:1}}>👦 {entry.kids.join(", ")}</div>}
-                {!weekend&&entry.note&&<div style={{fontSize:9,color:"#CCC",marginTop:1,fontStyle:"italic",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>📝 {entry.note}</div>}
-                {weekend&&<div style={{fontSize:9,color:"#C8B8E8",fontStyle:"italic"}}>Weekend</div>}
-                {weekend&&entry.events&&entry.events.slice(0,2).map((ev,ei)=><div key={ei} style={{fontSize:9,color:"#7B5BAA",marginTop:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>• {ev}</div>)}
-                {weekend&&entry.events&&entry.events.length>2&&<div style={{fontSize:9,color:"#BBB"}}>+{entry.events.length-2} more</div>}
+
+                {!weekend && cg && (
+                  <div style={{ fontSize: 10, fontWeight: "bold", color: cg.color }}>
+                    {cg.name}
+                  </div>
+                )}
+
+                {!weekend && !cg && <div style={{ fontSize: 9, color: "#DDD" }}>—</div>}
+
+                {!weekend && entry.kids && entry.kids.length > 0 && (
+                  <div style={{ fontSize: 9, color: "#999", marginTop: 1 }}>
+                    👦 {entry.kids.join(", ")}
+                  </div>
+                )}
+
+                {!weekend && entry.note && (
+                  <div style={{ fontSize: 9, color: "#CCC", marginTop: 1, fontStyle: "italic", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    📝 {entry.note}
+                  </div>
+                )}
+
+                {weekend && <div style={{ fontSize: 9, color: "#C8B8E8", fontStyle: "italic" }}>Weekend</div>}
+
+                {weekend && entry.events && entry.events.slice(0, 2).map((ev, ei) => (
+                  <div key={ei} style={{ fontSize: 9, color: "#7B5BAA", marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    • {ev}
+                  </div>
+                ))}
+
+                {weekend && entry.events && entry.events.length > 2 && (
+                  <div style={{ fontSize: 9, color: "#BBB" }}>
+                    +{entry.events.length - 2} more
+                  </div>
+                )}
               </div>
             );
           })}
         </div>
       </div>
-      {modal&&(()=>{const weekend=isWeekend(year,month,modal.day);return weekend?<WeekendModal day={modal.day} month={month} year={year} entry={schedule[modal.day]||{}} onUpdate={(f,v)=>updateDay(modal.day,f,v)} onClear={()=>{clearDay(modal.day);setModal(null);}} onClose={()=>setModal(null)}/>:<WeekdayModal day={modal.day} month={month} year={year} entry={schedule[modal.day]||{}} caregivers={caregivers} children={children} isPaulaOut={!!paulaOut[modal.day]} isTaylorIn={!!taylorIn[modal.day]} onUpdate={(f,v)=>updateDay(modal.day,f,v)} onTogglePaula={()=>togglePaula(modal.day)} onToggleTaylor={()=>toggleTaylor(modal.day)} onClear={()=>{clearDay(modal.day);setModal(null);}} onClose={()=>setModal(null)}/>;})()}
-      {settingsOpen&&<SettingsModal caregivers={caregivers} children={children} onSaveCaregivers={saveCaregivers} onSaveChildren={saveChildren} onClose={()=>setSettingsOpen(false)}/>}
+
+      {modal && (() => {
+        const weekend = isWeekend(year, month, modal.day);
+        return weekend ? (
+          <WeekendModal
+            day={modal.day}
+            month={month}
+            year={year}
+            entry={schedule[modal.day] || {}}
+            onUpdate={(f, v) => updateDay(modal.day, f, v)}
+            onClear={() => {
+              clearDay(modal.day);
+              setModal(null);
+            }}
+            onClose={() => setModal(null)}
+          />
+        ) : (
+          <WeekdayModal
+            day={modal.day}
+            month={month}
+            year={year}
+            entry={schedule[modal.day] || {}}
+            caregivers={caregivers}
+            children={children}
+            isPaulaOut={!!paulaOut[modal.day]}
+            isTaylorIn={!!taylorIn[modal.day]}
+            onUpdate={(f, v) => updateDay(modal.day, f, v)}
+            onTogglePaula={() => togglePaula(modal.day)}
+            onToggleTaylor={() => toggleTaylor(modal.day)}
+            onClear={() => {
+              clearDay(modal.day);
+              setModal(null);
+            }}
+            onClose={() => setModal(null)}
+          />
+        );
+      })()}
+
+      {settingsOpen && (
+        <SettingsModal
+          caregivers={caregivers}
+          children={children}
+          onSaveCaregivers={saveCaregivers}
+          onSaveChildren={saveChildren}
+          onClose={() => setSettingsOpen(false)}
+        />
+      )}
     </div>
   );
 }
-function PrintView({year,month,schedule,paulaOut,taylorIn,caregivers,children,cells,dayCG,onClose}){return(<div style={{minHeight:"100vh",background:"#fff",padding:"24px 32px"}}><div className="no-print" style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:22}}><div style={{fontSize:13,color:"#888"}}>Save as PDF → text to Gina, Paula & Vicki</div><div style={{display:"flex",gap:10}}><button onClick={onClose} style={{padding:"7px 16px",border:"1.5px solid #DDD",borderRadius:8,background:"#fff",cursor:"pointer",fontSize:13,color:"#888"}}>← Back</button><button onClick={()=>window.print()} style={{padding:"7px 18px",border:"none",borderRadius:8,background:"#2C2C2C",cursor:"pointer",fontSize:13,color:"#fff",fontWeight:"bold"}}>🖨 Print / Save PDF</button></div></div><div style={{textAlign:"center",marginBottom:18,borderBottom:"2px solid #2C2C2C",paddingBottom:12}}><div style={{fontSize:10,letterSpacing:4,textTransform:"uppercase",color:"#AAA",marginBottom:3}}>Lewis Family Childcare Schedule</div><div style={{fontSize:28,fontWeight:"bold",color:"#2C2C2C"}}>{MONTHS[month]} {year}</div></div><div style={{display:"flex",gap:18,justifyContent:"center",marginBottom:14,flexWrap:"wrap"}}>{caregivers.map(cg=><div key={cg.id} style={{display:"flex",alignItems:"center",gap:6}}><div style={{width:12,height:12,borderRadius:"50%",background:cg.color}}/><span style={{fontSize:12,fontWeight:"bold"}}>{cg.name}</span></div>)}<div style={{display:"flex",alignItems:"center",gap:6}}><div style={{width:12,height:12,borderRadius:3,background:"#D6E6FA",border:"1px solid #5B8CCC"}}/><span style={{fontSize:12}}>Taylor In Office</span></div><div style={{display:"flex",alignItems:"center",gap:6}}><div style={{width:12,height:12,borderRadius:3,background:"#FAE0E0",border:"1px solid #C97B7B"}}/><span style={{fontSize:12}}>Paula in Tampa</span></div></div><div style={{display:"grid",gridTemplateColumns:"repeat(7, 1fr)",gap:3,marginBottom:3}}>{DAYS.map(d=><div key={d} style={{textAlign:"center",fontSize:10,letterSpacing:2,color:"#999",textTransform:"uppercase",padding:"3px 0",borderBottom:"1px solid #EEE"}}>{d}</div>)}</div><div style={{display:"grid",gridTemplateColumns:"repeat(7, 1fr)",gap:3}}>{cells.map((day,i)=>{if(!day)return <div key={`e-${i}`} style={{minHeight:72}}/>;const weekend=isWeekend(year,month,day);const cg=!weekend?dayCG(day):null;const entry=schedule[day]||{};let bg="#fff",borderColor="#DDD";if(weekend){bg="#F9F7FF";borderColor="#D4C8EE";}else if(cg){bg=cg.light;borderColor=cg.color+"88";}return(<div key={day} style={{background:bg,border:`1.5px solid ${borderColor}`,borderRadius:5,padding:"5px 6px",minHeight:72}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}><span style={{fontSize:11,fontWeight:"bold",color:weekend?"#9B7EC8":"#555"}}>{day}</span><div style={{display:"flex",gap:2}}>{!!taylorIn[day]&&!weekend&&<div style={{fontSize:8,background:"#D6E6FA",color:"#3A6FAD",borderRadius:2,padding:"1px 3px",fontWeight:"bold"}}>T</div>}{!!paulaOut[day]&&!weekend&&<div style={{fontSize:8,background:"#FAE0E0",color:"#A84444",borderRadius:2,padding:"1px 3px"}}>✈</div>}</div></div>{!weekend&&cg&&<div style={{fontSize:11,fontWeight:"bold",color:cg.color}}>{cg.name}</div>}{!weekend&&!cg&&<div style={{fontSize:9,color:"#CCC"}}>—</div>}{!weekend&&entry.kids&&entry.kids.length>0&&<div style={{fontSize:9,color:"#888",marginTop:1}}>{entry.kids.join(", ")}</div>}{!weekend&&entry.note&&<div style={{fontSize:8,color:"#AAA",marginTop:1,fontStyle:"italic"}}>{entry.note}</div>}{weekend&&entry.events&&entry.events.map((ev,ei)=><div key={ei} style={{fontSize:9,color:"#7B5BAA",marginTop:1}}>• {ev}</div>)}</div>);})}</div><div style={{marginTop:24,borderTop:"1px solid #EEE",paddingTop:18}}><div style={{fontSize:10,letterSpacing:3,textTransform:"uppercase",color:"#AAA",marginBottom:12,textAlign:"center"}}>Monthly Summary by Caregiver</div><div style={{display:"grid",gridTemplateColumns:"repeat(3, 1fr)",gap:12}}>{caregivers.map(cg=>{const assigned=Object.entries(schedule).filter(([,e])=>e.caregiverId===cg.id).map(([d])=>parseInt(d)).sort((a,b)=>a-b);return(<div key={cg.id} style={{border:`1.5px solid ${cg.color}55`,borderRadius:7,padding:"10px 12px",background:cg.light}}><div style={{display:"flex",alignItems:"center",gap:7,marginBottom:7}}><div style={{width:9,height:9,borderRadius:"50%",background:cg.color}}/><span style={{fontSize:13,fontWeight:"bold"}}>{cg.name}</span><span style={{fontSize:11,color:"#999",marginLeft:"auto"}}>{assigned.length} days</span></div><div style={{fontSize:10,color:"#666",lineHeight:1.7}}>{assigned.length>0?assigned.map(d=>{const e=schedule[d]||{};const dow=DAYS[new Date(year,month,d).getDay()].slice(0,2);return<span key={d} style={{display:"inline-block",marginRight:5,marginBottom:2,background:"#fff",borderRadius:3,padding:"1px 5px",border:`1px solid ${cg.color}44`}}>{dow} {d}{e.kids&&e.kids.length>0?` (${e.kids.join("+")})`:""}</span>}):<span style={{color:"#CCC",fontStyle:"italic"}}>None assigned</span>}</div></div>);})}</div></div><div style={{marginTop:16,textAlign:"center",fontSize:10,color:"#CCC"}}>Generated {new Date().toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"})}</div></div>);}
-function WeekdayModal({day,month,year,entry,caregivers,children,isPaulaOut,isTaylorIn,onUpdate,onTogglePaula,onToggleTaylor,onClear,onClose}){const [note,setNote]=useState(entry.note||"");const [kids,setKids]=useState(entry.kids||[]);const toggleKid=(kid)=>{const u=kids.includes(kid)?kids.filter(k=>k!==kid):[...kids,kid];setKids(u);onUpdate("kids",u);};return(<ModalShell><MHeader day={day} month={month} year={year} weekend={false} onClose={onClose}/><div style={{display:"flex",gap:8,marginBottom:16}}><Pill active={isTaylorIn} activeColor="#5B8CCC" activeBg="#EAF1FB" onClick={onToggleTaylor}>🏢 Taylor In Office{isTaylorIn?" ✓":""}</Pill><Pill active={isPaulaOut} activeColor="#A84444" activeBg="#FAEAEA" onClick={onTogglePaula}>✈️ Paula in Tampa{isPaulaOut?" ✓":""}</Pill></div><Label>Assign Caregiver</Label><div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:16}}>{caregivers.map(c=>{const blocked=isPaulaOut&&c.name==="Paula";return<button key={c.id} onClick={()=>!blocked&&onUpdate("caregiverId",entry.caregiverId===c.id?null:c.id)} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",border:`2px solid ${entry.caregiverId===c.id?c.color:"#E8E2DA"}`,borderRadius:9,background:blocked?"#F5F5F5":entry.caregiverId===c.id?c.light:"#FAFAFA",cursor:blocked?"not-allowed":"pointer",textAlign:"left",opacity:blocked?0.5:1}}><div style={{width:10,height:10,borderRadius:"50%",background:c.color,flexShrink:0}}/><span style={{fontSize:13,fontWeight:entry.caregiverId===c.id?"bold":"normal",color:"#333"}}>{c.name}</span>{blocked&&<span style={{marginLeft:"auto",fontSize:10,color:"#C97B7B"}}>In Tampa</span>}{!blocked&&entry.caregiverId===c.id&&<span style={{marginLeft:"auto",fontSize:11,color:c.color}}>✓</span>}</button>;})}</div><Label>Children Covered</Label><div style={{display:"flex",gap:7,flexWrap:"wrap",marginBottom:16}}>{children.map(kid=><button key={kid} onClick={()=>toggleKid(kid)} style={{padding:"5px 13px",borderRadius:20,border:`1.5px solid ${kids.includes(kid)?"#7EB8D4":"#DDD"}`,background:kids.includes(kid)?"#E6F4FA":"#FAFAFA",cursor:"pointer",fontSize:13,color:kids.includes(kid)?"#3A8FAD":"#888",fontWeight:kids.includes(kid)?"bold":"normal"}}>{kid}</button>)}</div><Label>Notes</Label><textarea value={note} onChange={e=>setNote(e.target.value)} onBlur={()=>onUpdate("note",note)} placeholder="Special instructions, reminders..." style={{width:"100%",border:"1.5px solid #E8E2DA",borderRadius:8,padding:"8px 10px",fontSize:13,fontFamily:"Georgia,serif",resize:"vertical",minHeight:56,color:"#444",outline:"none",boxSizing:"border-box",marginBottom:16}}/><MFooter onClear={onClear} onClose={onClose}/></ModalShell>);}
-function WeekendModal({day,month,year,entry,onUpdate,onClear,onClose}){const [events,setEvents]=useState(entry.events||[]);const [newEvent,setNewEvent]=useState("");const [note,setNote]=useState(entry.note||"");const addEvent=()=>{if(!newEvent.trim())return;const u=[...events,newEvent.trim()];setEvents(u);onUpdate("events",u);setNewEvent("");};const removeEvent=(i)=>{const u=events.filter((_,ei)=>ei!==i);setEvents(u);onUpdate("events",u);};return(<ModalShell><MHeader day={day} month={month} year={year} weekend={true} onClose={onClose}/><div style={{background:"#F3EEF9",borderRadius:8,padding:"8px 12px",marginBottom:16,fontSize:12,color:"#9B7EC8"}}>🎉 Weekend — no caregiver coverage. Add family events below!</div><Label>Events</Label><div style={{display:"flex",gap:6,marginBottom:9}}><input value={newEvent} onChange={e=>setNewEvent(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addEvent()} placeholder="e.g. Birthday party, Grocery run..." style={{flex:1,border:"1.5px solid #D4C8EE",borderRadius:8,padding:"7px 10px",fontSize:13,fontFamily:"Georgia,serif",outline:"none"}}/><button onClick={addEvent} style={{padding:"7px 13px",border:"none",borderRadius:8,background:"#9B7EC8",color:"#fff",cursor:"pointer",fontSize:16,fontWeight:"bold"}}>+</button></div>{events.length>0&&<div style={{marginBottom:13,display:"flex",flexDirection:"column",gap:5}}>{events.map((ev,i)=><div key={i} style={{display:"flex",alignItems:"center",gap:8,background:"#F8F5FF",borderRadius:7,padding:"6px 10px"}}><span style={{flex:1,fontSize:13,color:"#5A3D8A"}}>• {ev}</span><button onClick={()=>removeEvent(i)} style={{background:"none",border:"none",color:"#CCC",cursor:"pointer",fontSize:16}}>×</button></div>)}</div>}<Label>Notes</Label><textarea value={note} onChange={e=>setNote(e.target.value)} onBlur={()=>onUpdate("note",note)} placeholder="Reminders, details..." style={{width:"100%",border:"1.5px solid #D4C8EE",borderRadius:8,padding:"7px 10px",fontSize:13,fontFamily:"Georgia,serif",resize:"vertical",minHeight:52,color:"#444",outline:"none",boxSizing:"border-box",marginBottom:16}}/><MFooter onClear={onClear} onClose={onClose}/></ModalShell>);}
-function SettingsModal({caregivers,children,onSaveCaregivers,onSaveChildren,onClose}){const [cgs,setCgs]=useState(caregivers.map(c=>({...c})));const [kids,setKids]=useState([...children]);const save=()=>{onSaveCaregivers(cgs);onSaveChildren(kids);onClose();};return(<ModalShell><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}><div style={{fontSize:17,fontWeight:"bold",color:"#2C2C2C"}}>Settings</div><button onClick={onClose} style={{background:"none",border:"none",fontSize:22,cursor:"pointer",color:"#AAA"}}>×</button></div><Label>Caregiver Names</Label>{cgs.map((cg,i)=><div key={cg.id} style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}><div style={{width:10,height:10,borderRadius:"50%",background:cg.color,flexShrink:0}}/><input value={cg.name} onChange={e=>{const u=[...cgs];u[i]={...cg,name:e.target.value};setCgs(u);}} style={{flex:1,border:"1.5px solid #E8E2DA",borderRadius:8,padding:"7px 10px",fontSize:14,fontFamily:"Georgia,serif",outline:"none"}}/></div>)}<Label style={{marginTop:14}}>Children's Names</Label>{kids.map((kid,i)=><div key={i} style={{marginBottom:8}}><input value={kid} onChange={e=>{const u=[...kids];u[i]=e.target.value;setKids(u);}} style={{width:"100%",border:"1.5px solid #E8E2DA",borderRadius:8,padding:"7px 10px",fontSize:14,fontFamily:"Georgia,serif",outline:"none",boxSizing:"border-box"}}/></div>)}<button onClick={save} style={{width:"100%",padding:"10px",border:"none",borderRadius:8,background:"#2C2C2C",cursor:"pointer",fontSize:14,color:"#fff",fontWeight:"bold",marginTop:8}}>Save Changes</button></ModalShell>);}
-function ModalShell({children}){return(<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:100,padding:20}}><div style={{background:"#fff",borderRadius:16,padding:22,width:"100%",maxWidth:400,boxShad​​​​​​​​​​​​​​​​
+
+function PrintView({ year, month, schedule, paulaOut, taylorIn, caregivers, children, cells, dayCG, onClose }) {
+  return (
+    <div style={{ minHeight: "100vh", background: "#fff", padding: "24px 32px" }}>
+      <div className="no-print" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 22 }}>
+        <div style={{ fontSize: 13, color: "#888" }}>Save as PDF → text to Gina, Paula & Vicki</div>
+        <div style={{ display: "flex", gap: 10 }}>
+          <button onClick={onClose} style={{ padding: "7px 16px", border: "1.5px solid #DDD", borderRadius: 8, background: "#fff", cursor: "pointer", fontSize: 13, color: "#888" }}>
+            ← Back
+          </button>
+          <button onClick={() => window.print()} style={{ padding: "7px 18px", border: "none", borderRadius: 8, background: "#2C2C2C", cursor: "pointer", fontSize: 13, color: "#fff", fontWeight: "bold" }}>
+            🖨 Print / Save PDF
+          </button>
+        </div>
+      </div>
+
+      <div style={{ textAlign: "center", marginBottom: 18, borderBottom: "2px solid #2C2C2C", paddingBottom: 12 }}>
+        <div style={{ fontSize: 10, letterSpacing: 4, textTransform: "uppercase", color: "#AAA", marginBottom: 3 }}>
+          Lewis Family Childcare Schedule
+        </div>
+        <div style={{ fontSize: 28, fontWeight: "bold", color: "#2C2C2C" }}>
+          {MONTHS[month]} {year}
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 18, justifyContent: "center", marginBottom: 14, flexWrap: "wrap" }}>
+        {caregivers.map(cg => (
+          <div key={cg.id} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <div style={{ width: 12, height: 12, borderRadius: "50%", background: cg.color }} />
+            <span style={{ fontSize: 12, fontWeight: "bold" }}>{cg.name}</span>
+          </div>
+        ))}
+
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <div style={{ width: 12, height: 12, borderRadius: 3, background: "#D6E6FA", border: "1px solid #5B8CCC" }} />
+          <span style={{ fontSize: 12 }}>Taylor In Office</span>
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <div style={{ width: 12, height: 12, borderRadius: 3, background: "#FAE0E0", border: "1px solid #C97B7B" }} />
+          <span style={{ fontSize: 12 }}>Paula in Tampa</span>
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 3, marginBottom: 3 }}>
+        {DAYS.map(d => (
+          <div key={d} style={{ textAlign: "center", fontSize: 10, letterSpacing: 2, color: "#999", textTransform: "uppercase", padding: "3px 0", borderBottom: "1px solid #EEE" }}>
+            {d}
+          </div>
+        ))}
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 3 }}>
+        {cells.map((day, i) => {
+          if (!day) return <div key={`e-${i}`} style={{ minHeight: 72 }} />;
+
+          const weekend = isWeekend(year, month, day);
+          const cg = !weekend ? dayCG(day) : null;
+          const entry = schedule[day] || {};
+
+          let bg = "#fff";
+          let borderColor = "#DDD";
+
+          if (weekend) {
+            bg = "#F9F7FF";
+            borderColor = "#D4C8EE";
+          } else if (cg) {
+            bg = cg.light;
+            borderColor = cg.color + "88";
+          }
+
+          return (
+            <div key={day} style={{ background: bg, border: `1.5px solid ${borderColor}`, borderRadius: 5, padding: "5px 6px", minHeight: 72 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 2 }}>
+                <span style={{ fontSize: 11, fontWeight: "bold", color: weekend ? "#9B7EC8" : "#555" }}>{day}</span>
+                <div style={{ display: "flex", gap: 2 }}>
+                  {!!taylorIn[day] && !weekend && (
+                    <div style={{ fontSize: 8, background: "#D6E6FA", color: "#3A6FAD", borderRadius: 2, padding: "1px 3px", fontWeight: "bold" }}>
+                      T
+                    </div>
+                  )}
+                  {!!paulaOut[day] && !weekend && (
+                    <div style={{ fontSize: 8, background: "#FAE0E0", color: "#A84444", borderRadius: 2, padding: "1px 3px" }}>
+                      ✈
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {!weekend && cg && <div style={{ fontSize: 11, fontWeight: "bold", color: cg.color }}>{cg.name}</div>}
+              {!weekend && !cg && <div style={{ fontSize: 9, color: "#CCC" }}>—</div>}
+              {!weekend && entry.kids && entry.kids.length > 0 && <div style={{ fontSize: 9, color: "#888", marginTop: 1 }}>{entry.kids.join(", ")}</div>}
+              {!weekend && entry.note && <div style={{ fontSize: 8, color: "#AAA", marginTop: 1, fontStyle: "italic" }}>{entry.note}</div>}
+              {weekend && entry.events && entry.events.map((ev, ei) => (
+                <div key={ei} style={{ fontSize: 9, color: "#7B5BAA", marginTop: 1 }}>
+                  • {ev}
+                </div>
+              ))}
+            </div>
+          );
+        })}
+      </div>
+
+      <div style={{ marginTop: 24, borderTop: "1px solid #EEE", paddingTop: 18 }}>
+        <div style={{ fontSize: 10, letterSpacing: 3, textTransform: "uppercase", color: "#AAA", marginBottom: 12, textAlign: "center" }}>
+          Monthly Summary by Caregiver
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
+          {caregivers.map(cg => {
+            const assigned = Object.entries(schedule)
+              .filter(([, e]) => e.caregiverId === cg.id)
+              .map(([d]) => parseInt(d))
+              .sort((a, b) => a - b);
+
+            return (
+              <div key={cg.id} style={{ border: `1.5px solid ${cg.color}55`, borderRadius: 7, padding: "10px 12px", background: cg.light }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 7 }}>
+                  <div style={{ width: 9, height: 9, borderRadius: "50%", background: cg.color }} />
+                  <span style={{ fontSize: 13, fontWeight: "bold" }}>{cg.name}</span>
+                  <span style={{ fontSize: 11, color: "#999", marginLeft: "auto" }}>{assigned.length} days</span>
+                </div>
+
+                <div style={{ fontSize: 10, color: "#666", lineHeight: 1.7 }}>
+                  {assigned.length > 0 ? assigned.map(d => {
+                    const e = schedule[d] || {};
+                    const dow = DAYS[new Date(year, month, d).getDay()].slice(0, 2);
+
+                    return (
+                      <span key={d} style={{ display: "inline-block", marginRight: 5, marginBottom: 2, background: "#fff", borderRadius: 3, padding: "1px 5px", border: `1px solid ${cg.color}44` }}>
+                        {dow} {d}{e.kids && e.kids.length > 0 ? ` (${e.kids.join("+")})` : ""}
+                      </span>
+                    );
+                  }) : (
+                    <span style={{ color: "#CCC", fontStyle: "italic" }}>None assigned</span>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div style={{ marginTop: 16, textAlign: "center", fontSize: 10, color: "#CCC" }}>
+        Generated {new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
+      </div>
+    </div>
+  );
+}
+
+function WeekdayModal({ day, month, year, entry, caregivers, children, isPaulaOut, isTaylorIn, onUpdate, onTogglePaula, onToggleTaylor, onClear, onClose }) {
+  const [note, setNote] = useState(entry.note || "");
+  const [kids, setKids] = useState(entry.kids || []);
+
+  const toggleKid = (kid) => {
+    const u = kids.includes(kid) ? kids.filter(k => k !== kid) : [...kids, kid];
+    setKids(u);
+    onUpdate("kids", u);
+  };
+
+  return (
+    <ModalShell>
+      <MHeader day={day} month={month} year={year} weekend={false} onClose={onClose} />
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+        <Pill active={isTaylorIn} activeColor="#5B8CCC" activeBg="#EAF1FB" onClick={onToggleTaylor}>
+          🏢 Taylor In Office{isTaylorIn ? " ✓" : ""}
+        </Pill>
+
+        <Pill active={isPaulaOut} activeColor="#A84444" activeBg="#FAEAEA" onClick={onTogglePaula}>
+          ✈️ Paula in Tampa{isPaulaOut ? " ✓" : ""}
+        </Pill>
+      </div>
+
+      <Label>Assign Caregiver</Label>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 16 }}>
+        {caregivers.map(c => {
+          const blocked = isPaulaOut && c.name === "Paula";
+
+          return (
+            <button
+              key={c.id}
+              onClick={() => !blocked && onUpdate("caregiverId", entry.caregiverId === c.id ? null : c.id)}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                padding: "8px 12px",
+                border: `2px solid ${entry.caregiverId === c.id ? c.color : "#E8E2DA"}`,
+                borderRadius: 9,
+                background: blocked ? "#F5F5F5" : entry.caregiverId === c.id ? c.light : "#FAFAFA",
+                cursor: blocked ? "not-allowed" : "pointer",
+                textAlign: "left",
+                opacity: blocked ? 0.5 : 1
+              }}
+            >
+              <div style={{ width: 10, height: 10, borderRadius: "50%", background: c.color, flexShrink: 0 }} />
+              <span style={{ fontSize: 13, fontWeight: entry.caregiverId === c.id ? "bold" : "normal", color: "#333" }}>
+                {c.name}
+              </span>
+
+              {blocked && <span style={{ marginLeft: "auto", fontSize: 10, color: "#C97B7B" }}>In Tampa</span>}
+              {!blocked && entry.caregiverId === c.id && <span style={{ marginLeft: "auto", fontSize: 11, color: c.color }}>✓</span>}
+            </button>
+          );
+        })}
+      </div>
+
+      <Label>Children Covered</Label>
+
+      <div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginBottom: 16 }}>
+        {children.map(kid => (
+          <button
+            key={kid}
+            onClick={() => toggleKid(kid)}
+            style={{
+              padding: "5px 13px",
+              borderRadius: 20,
+              border: `1.5px solid ${kids.includes(kid) ? "#7EB8D4" : "#DDD"}`,
+              background: kids.includes(kid) ? "#E6F4FA" : "#FAFAFA",
+              cursor: "pointer",
+              fontSize: 13,
+              color: kids.includes(kid) ? "#3A8FAD" : "#888",
+              fontWeight: kids.includes(kid) ? "bold" : "normal"
+            }}
+          >
+            {kid}
+          </button>
+        ))}
+      </div>
+
+      <Label>Notes</Label>
+
+      <textarea
+        value={note}
+        onChange={e => setNote(e.target.value)}
+        onBlur={() => onUpdate("note", note)}
+        placeholder="Special instructions, reminders..."
+        style={{
+          width: "100%",
+          border: "1.5px solid #E8E2DA",
+          borderRadius: 8,
+          padding: "8px 10px",
+          fontSize: 13,
+          fontFamily: "Georgia,serif",
+          resize: "vertical",
+          minHeight: 56,
+          color: "#444",
+          outline: "none",
+          boxSizing: "border-box",
+          marginBottom: 16
+        }}
+      />
+
+      <MFooter onClear={onClear} onClose={onClose} />
+    </ModalShell>
+  );
+}
+
+function WeekendModal({ day, month, year, entry, onUpdate, onClear, onClose }) {
+  const [events, setEvents] = useState(entry.events || []);
+  const [newEvent, setNewEvent] = useState("");
+  const [note, setNote] = useState(entry.note || "");
+
+  const addEvent = () => {
+    if (!newEvent.trim()) return;
+    const u = [...events, newEvent.trim()];
+    setEvents(u);
+    onUpdate("events", u);
+    setNewEvent("");
+  };
+
+  const removeEvent = (i) => {
+    const u = events.filter((_, ei) => ei !== i);
+    setEvents(u);
+    onUpdate("events", u);
+  };
+
+  return (
+    <ModalShell>
+      <MHeader day={day} month={month} year={year} weekend={true} onClose={onClose} />
+
+      <div style={{ background: "#F3EEF9", borderRadius: 8, padding: "8px 12px", marginBottom: 16, fontSize: 12, color: "#9B7EC8" }}>
+        🎉 Weekend — no caregiver coverage. Add family events below!
+      </div>
+
+      <Label>Events</Label>
+
+      <div style={{ display: "flex", gap: 6, marginBottom: 9 }}>
+        <input
+          value={newEvent}
+          onChange={e => setNewEvent(e.target.value)}
+          onKeyDown={e => e.key === "Enter" && addEvent()}
+          placeholder="e.g. Birthday party, Grocery run..."
+          style={{ flex: 1, border: "1.5px solid #D4C8EE", borderRadius: 8, padding: "7px 10px", fontSize: 13, fontFamily: "Georgia,serif", outline: "none" }}
+        />
+
+        <button
+          onClick={addEvent}
+          style={{ padding: "7px 13px", border: "none", borderRadius: 8, background: "#9B7EC8", color: "#fff", cursor: "pointer", fontSize: 16, fontWeight: "bold" }}
+        >
+          +
+        </button>
+      </div>
+
+      {events.length > 0 && (
+        <div style={{ marginBottom: 13, display: "flex", flexDirection: "column", gap: 5 }}>
+          {events.map((ev, i) => (
+            <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, background: "#F8F5FF", borderRadius: 7, padding: "6px 10px" }}>
+              <span style={{ flex: 1, fontSize: 13, color: "#5A3D8A" }}>• {ev}</span>
+              <button onClick={() => removeEvent(i)} style={{ background: "none", border: "none", color: "#CCC", cursor: "pointer", fontSize: 16 }}>
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <Label>Notes</Label>
+
+      <textarea
+        value={note}
+        onChange={e => setNote(e.target.value)}
+        onBlur={() => onUpdate("note", note)}
+        placeholder="Reminders, details..."
+        style={{
+          width: "100%",
+          border: "1.5px solid #D4C8EE",
+          borderRadius: 8,
+          padding: "7px 10px",
+          fontSize: 13,
+          fontFamily: "Georgia,serif",
+          resize: "vertical",
+          minHeight: 52,
+          color: "#444",
+          outline: "none",
+          boxSizing: "border-box",
+          marginBottom: 16
+        }}
+      />
+
+      <MFooter onClear={onClear} onClose={onClose} />
+    </ModalShell>
+  );
+}
+
+function SettingsModal({ caregivers, children, onSaveCaregivers, onSaveChildren, onClose }) {
+  const [cgs, setCgs] = useState(caregivers.map(c => ({ ...c })));
+  const [kids, setKids] = useState([...children]);
+
+  const save = () => {
+    onSaveCaregivers(cgs);
+    onSaveChildren(kids);
+    onClose();
+  };
+
+  return (
+    <ModalShell>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
+        <div style={{ fontSize: 17, fontWeight: "bold", color: "#2C2C2C" }}>Settings</div>
+        <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#AAA" }}>
+          ×
+        </button>
+      </div>
+
+      <Label>Caregiver Names</Label>
+
+      {cgs.map((cg, i) => (
+        <div key={cg.id} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+          <div style={{ width: 10, height: 10, borderRadius: "50%", background: cg.color, flexShrink: 0 }} />
+          <input
+            value={cg.name}
+            onChange={e => {
+              const u = [...cgs];
+              u[i] = { ...cg, name: e.target.value };
+              setCgs(u);
+            }}
+            style={{ flex: 1, border: "1.5px solid #E8E2DA", borderRadius: 8, padding: "7px 10px", fontSize: 14, fontFamily: "Georgia,serif", outline: "none" }}
+          />
+        </div>
+      ))}
+
+      <Label style={{ marginTop: 14 }}>Children&apos;s Names</Label>
+
+      {kids.map((kid, i) => (
+        <div key={i} style={{ marginBottom: 8 }}>
+          <input
+            value={kid}
+            onChange={e => {
+              const u = [...kids];
+              u[i] = e.target.value;
+              setKids(u);
+            }}
+            style={{ width: "100%", border: "1.5px solid #E8E2DA", borderRadius: 8, padding: "7px 10px", fontSize: 14, fontFamily: "Georgia,serif", outline: "none", boxSizing: "border-box" }}
+          />
+        </div>
+      ))}
+
+      <button
+        onClick={save}
+        style={{ width: "100%", padding: "10px", border: "none", borderRadius: 8, background: "#2C2C2C", cursor: "pointer", fontSize: 14, color: "#fff", fontWeight: "bold", marginTop: 8 }}
+      >
+        Save Changes
+      </button>
+    </ModalShell>
+  );
+}
+
+function ModalShell({ children }) {
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100, padding: 20 }}>
+      <div style={{ background: "#fff", borderRadius: 16, padding: 22, width: "100%", maxWidth: 400, boxShadow: "0 20px 60px rgba(0,0,0,0.2)", maxHeight: "92vh", overflowY: "auto" }}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function MHeader({ day, month, year, weekend, onClose }) {
+  const mn = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+      <div>
+        <div style={{ fontSize: 10, color: "#AAA", letterSpacing: 3, textTransform: "uppercase" }}>
+          {mn[month]} {year}
+        </div>
+        <div style={{ fontSize: 19, fontWeight: "bold", color: weekend ? "#9B7EC8" : "#2C2C2C" }}>
+          {DAYS[new Date(year, month, day).getDay()]}, {mn[month]} {day}
+        </div>
+      </div>
+
+      <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#AAA" }}>
+        ×
+      </button>
+    </div>
+  );
+}
+
+function MFooter({ onClear, onClose }) {
+  return (
+    <div style={{ display: "flex", gap: 8 }}>
+      <button onClick={onClear} style={{ flex: 1, padding: "9px", border: "1.5px solid #EEE", borderRadius: 8, background: "#FAFAFA", cursor: "pointer", fontSize: 13, color: "#AAA" }}>
+        Clear
+      </button>
+      <button onClick={onClose} style={{ flex: 2, padding: "9px", border: "none", borderRadius: 8, background: "#2C2C2C", cursor: "pointer", fontSize: 13, color: "#fff", fontWeight: "bold" }}>
+        Done
+      </button>
+    </div>
+  );
+}
+
+function Label({ children, style }) {
+  return (
+    <div style={{ fontSize: 10, letterSpacing: 2, color: "#AAA", textTransform: "uppercase", marginBottom: 7, ...style }}>
+      {children}
+    </div>
+  );
+}
+
+function Pill({ active, activeColor, activeBg, onClick, children }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        flex: 1,
+        padding: "8px 7px",
+        borderRadius: 8,
+        border: `2px solid ${active ? activeColor : "#E8E2DA"}`,
+        background: active ? activeBg : "#FAFAFA",
+        cursor: "pointer",
+        fontSize: 11,
+        fontWeight: active ? "bold" : "normal",
+        color: active ? activeColor : "#AAA"
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+ReactDOM.render(<App />, document.getElementById("root"));
+</script>
+</body>
+</html>
