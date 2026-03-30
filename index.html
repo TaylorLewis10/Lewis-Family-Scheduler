@@ -59,6 +59,39 @@ function isWeekend(y, m, d) {
   return w === 0 || w === 6;
 }
 
+function normalizeAssignments(entry, childrenList) {
+  if (!entry) return [];
+
+  if (Array.isArray(entry.assignments)) {
+    return entry.assignments
+      .map(a => ({
+        caregiverId: a && a.caregiverId ? a.caregiverId : "",
+        kids: Array.isArray(a && a.kids)
+          ? [...new Set(a.kids.filter(Boolean))]
+          : (a && a.child ? [a.child] : [])
+      }))
+      .filter(a => a.caregiverId || a.kids.length > 0);
+  }
+
+  // Backward compatibility with old data
+  if (entry.caregiverId) {
+    let legacyKids = Array.isArray(entry.kids) ? entry.kids.filter(Boolean) : [];
+    if (legacyKids.length === 0 && Array.isArray(childrenList) && childrenList.length > 0) {
+      legacyKids = [...childrenList];
+    }
+    return [{
+      caregiverId: entry.caregiverId,
+      kids: legacyKids
+    }];
+  }
+
+  return [];
+}
+
+function uniqueKidsFromAssignments(assignments) {
+  return [...new Set(assignments.flatMap(a => Array.isArray(a.kids) ? a.kids : []))];
+}
+
 function App() {
   const today = new Date();
   const [year, setYear] = useState(today.getFullYear());
@@ -86,13 +119,13 @@ function App() {
       setConnected(true);
     });
 
-    const s2 = db.collection("paulaOut").doc(mk).onSnapshot(snap =>
-      setPaulaOut(snap.exists ? snap.data().days || {} : {})
-    );
+    const s2 = db.collection("paulaOut").doc(mk).onSnapshot(snap => {
+      setPaulaOut(snap.exists ? snap.data().days || {} : {});
+    });
 
-    const s3 = db.collection("taylorIn").doc(mk).onSnapshot(snap =>
-      setTaylorIn(snap.exists ? snap.data().days || {} : {})
-    );
+    const s3 = db.collection("taylorIn").doc(mk).onSnapshot(snap => {
+      setTaylorIn(snap.exists ? snap.data().days || {} : {});
+    });
 
     const s4 = db.collection("settings").doc("caregivers").onSnapshot(snap => {
       if (snap.exists) setCaregivers(snap.data().list || CAREGIVERS_DEFAULT);
@@ -103,7 +136,6 @@ function App() {
     });
 
     unsubRefs.current = [s1, s2, s3, s4, s5];
-
     return () => unsubRefs.current.forEach(u => u());
   }, [year, month]);
 
@@ -118,28 +150,36 @@ function App() {
   };
 
   const updateDay = (day, field, value) => {
-    const u = { ...schedule, [day]: { ...(schedule[day] || {}), [field]: value } };
-    setSchedule(u);
-    save("schedules", mk, { days: u });
+    const current = schedule[day] || {};
+    const updatedDay = { ...current, [field]: value };
+
+    if (field === "assignments") {
+      delete updatedDay.caregiverId;
+      delete updatedDay.kids;
+    }
+
+    const updated = { ...schedule, [day]: updatedDay };
+    setSchedule(updated);
+    save("schedules", mk, { days: updated });
   };
 
   const clearDay = (day) => {
-    const u = { ...schedule };
-    delete u[day];
-    setSchedule(u);
-    save("schedules", mk, { days: u });
+    const updated = { ...schedule };
+    delete updated[day];
+    setSchedule(updated);
+    save("schedules", mk, { days: updated });
   };
 
   const togglePaula = (day) => {
-    const u = { ...paulaOut, [day]: !paulaOut[day] };
-    setPaulaOut(u);
-    save("paulaOut", mk, { days: u });
+    const updated = { ...paulaOut, [day]: !paulaOut[day] };
+    setPaulaOut(updated);
+    save("paulaOut", mk, { days: updated });
   };
 
   const toggleTaylor = (day) => {
-    const u = { ...taylorIn, [day]: !taylorIn[day] };
-    setTaylorIn(u);
-    save("taylorIn", mk, { days: u });
+    const updated = { ...taylorIn, [day]: !taylorIn[day] };
+    setTaylorIn(updated);
+    save("taylorIn", mk, { days: updated });
   };
 
   const saveCaregivers = (list) => {
@@ -175,18 +215,20 @@ function App() {
   const cells = Array(firstDay).fill(null).concat(
     Array.from({ length: daysInMonth }, (_, i) => i + 1)
   );
-
   while (cells.length % 7 !== 0) cells.push(null);
 
-  const dayCG = (day) => {
-    const e = schedule[day];
-    if (!e || !e.caregiverId) return null;
-    return caregivers.find(c => c.id === e.caregiverId) || null;
-  };
+  const dayAssignments = (day) => normalizeAssignments(schedule[day], children);
+
+  const dayCGs = (day) =>
+    dayAssignments(day)
+      .map(a => caregivers.find(c => c.id === a.caregiverId))
+      .filter(Boolean);
 
   const cgSummary = caregivers.map(cg => ({
     ...cg,
-    days: Object.values(schedule).filter(e => e.caregiverId === cg.id).length
+    days: Object.values(schedule).filter(e =>
+      normalizeAssignments(e, children).some(a => a.caregiverId === cg.id)
+    ).length
   }));
 
   const taylorDays = Object.keys(taylorIn).filter(k => taylorIn[k]).length;
@@ -203,7 +245,8 @@ function App() {
         caregivers={caregivers}
         children={children}
         cells={cells}
-        dayCG={dayCG}
+        dayAssignments={dayAssignments}
+        dayCGs={dayCGs}
         onClose={() => setPrintView(false)}
       />
     );
@@ -315,8 +358,9 @@ function App() {
             if (!day) return <div key={`e-${i}`} />;
 
             const weekend = isWeekend(year, month, day);
-            const cg = !weekend ? dayCG(day) : null;
             const entry = schedule[day] || {};
+            const assignments = !weekend ? dayAssignments(day) : [];
+            const caregiversForDay = !weekend ? dayCGs(day) : [];
             const isPaulaOut = !!paulaOut[day];
             const isTaylorIn = !!taylorIn[day];
             const isToday =
@@ -330,9 +374,9 @@ function App() {
             if (weekend) {
               bg = "#F8F5FF";
               borderColor = "#D4C8EE";
-            } else if (cg) {
-              bg = cg.light;
-              borderColor = cg.color + "66";
+            } else if (caregiversForDay.length > 0) {
+              bg = caregiversForDay[0].light;
+              borderColor = caregiversForDay[0].color + "66";
             }
 
             return (
@@ -345,7 +389,7 @@ function App() {
                   borderRadius: 8,
                   padding: "6px 6px 5px",
                   cursor: "pointer",
-                  minHeight: 78,
+                  minHeight: 92,
                   transition: "transform 0.1s, box-shadow 0.1s",
                   boxShadow: "0 1px 3px rgba(0,0,0,0.04)"
                 }}
@@ -369,25 +413,27 @@ function App() {
                   </div>
                 </div>
 
-                {!weekend && cg && (
-                  <div style={{ fontSize: 10, fontWeight: "bold", color: cg.color }}>
-                    {cg.name}
-                  </div>
+                {!weekend && assignments.length === 0 && (
+                  <div style={{ fontSize: 9, color: "#DDD" }}>—</div>
                 )}
 
-                {!weekend && !cg && <div style={{ fontSize: 9, color: "#DDD" }}>—</div>}
+                {!weekend && assignments.map((a, idx) => {
+                  const cg = caregivers.find(c => c.id === a.caregiverId);
+                  if (!cg) return null;
 
-                {!weekend && entry.kids && entry.kids.length > 0 && (
-                  <div style={{ fontSize: 9, color: "#999", marginTop: 1 }}>
-                    👦 {entry.kids.join(", ")}
-                  </div>
-                )}
-
-                {!weekend && entry.note && (
-                  <div style={{ fontSize: 9, color: "#CCC", marginTop: 1, fontStyle: "italic", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    📝 {entry.note}
-                  </div>
-                )}
+                  return (
+                    <div key={idx} style={{ marginTop: idx === 0 ? 0 : 4 }}>
+                      <div style={{ fontSize: 10, fontWeight: "bold", color: cg.color }}>
+                        {cg.name}
+                      </div>
+                      {a.kids && a.kids.length > 0 && (
+                        <div style={{ fontSize: 9, color: "#999", marginTop: 1 }}>
+                          👦 {a.kids.join(", ")}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
 
                 {weekend && <div style={{ fontSize: 9, color: "#C8B8E8", fontStyle: "italic" }}>Weekend</div>}
 
@@ -402,6 +448,12 @@ function App() {
                     +{entry.events.length - 2} more
                   </div>
                 )}
+
+                {!weekend && entry.note && (
+                  <div style={{ fontSize: 9, color: "#CCC", marginTop: 2, fontStyle: "italic", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    📝 {entry.note}
+                  </div>
+                )}
               </div>
             );
           })}
@@ -410,6 +462,7 @@ function App() {
 
       {modal && (() => {
         const weekend = isWeekend(year, month, modal.day);
+
         return weekend ? (
           <WeekendModal
             day={modal.day}
@@ -458,7 +511,7 @@ function App() {
   );
 }
 
-function PrintView({ year, month, schedule, paulaOut, taylorIn, caregivers, children, cells, dayCG, onClose }) {
+function PrintView({ year, month, schedule, paulaOut, taylorIn, caregivers, children, cells, dayAssignments, dayCGs, onClose }) {
   return (
     <div style={{ minHeight: "100vh", background: "#fff", padding: "24px 32px" }}>
       <div className="no-print" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 22 }}>
@@ -514,8 +567,9 @@ function PrintView({ year, month, schedule, paulaOut, taylorIn, caregivers, chil
           if (!day) return <div key={`e-${i}`} style={{ minHeight: 72 }} />;
 
           const weekend = isWeekend(year, month, day);
-          const cg = !weekend ? dayCG(day) : null;
           const entry = schedule[day] || {};
+          const assignments = !weekend ? dayAssignments(day) : [];
+          const cgs = !weekend ? dayCGs(day) : [];
 
           let bg = "#fff";
           let borderColor = "#DDD";
@@ -523,13 +577,13 @@ function PrintView({ year, month, schedule, paulaOut, taylorIn, caregivers, chil
           if (weekend) {
             bg = "#F9F7FF";
             borderColor = "#D4C8EE";
-          } else if (cg) {
-            bg = cg.light;
-            borderColor = cg.color + "88";
+          } else if (cgs.length > 0) {
+            bg = cgs[0].light;
+            borderColor = cgs[0].color + "88";
           }
 
           return (
-            <div key={day} style={{ background: bg, border: `1.5px solid ${borderColor}`, borderRadius: 5, padding: "5px 6px", minHeight: 72 }}>
+            <div key={day} style={{ background: bg, border: `1.5px solid ${borderColor}`, borderRadius: 5, padding: "5px 6px", minHeight: 78 }}>
               <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 2 }}>
                 <span style={{ fontSize: 11, fontWeight: "bold", color: weekend ? "#9B7EC8" : "#555" }}>{day}</span>
                 <div style={{ display: "flex", gap: 2 }}>
@@ -546,10 +600,33 @@ function PrintView({ year, month, schedule, paulaOut, taylorIn, caregivers, chil
                 </div>
               </div>
 
-              {!weekend && cg && <div style={{ fontSize: 11, fontWeight: "bold", color: cg.color }}>{cg.name}</div>}
-              {!weekend && !cg && <div style={{ fontSize: 9, color: "#CCC" }}>—</div>}
-              {!weekend && entry.kids && entry.kids.length > 0 && <div style={{ fontSize: 9, color: "#888", marginTop: 1 }}>{entry.kids.join(", ")}</div>}
-              {!weekend && entry.note && <div style={{ fontSize: 8, color: "#AAA", marginTop: 1, fontStyle: "italic" }}>{entry.note}</div>}
+              {!weekend && assignments.length === 0 && (
+                <div style={{ fontSize: 9, color: "#CCC" }}>—</div>
+              )}
+
+              {!weekend && assignments.map((a, idx) => {
+                const cg = caregivers.find(c => c.id === a.caregiverId);
+                if (!cg) return null;
+                return (
+                  <div key={idx} style={{ marginTop: idx === 0 ? 0 : 3 }}>
+                    <div style={{ fontSize: 11, fontWeight: "bold", color: cg.color }}>
+                      {cg.name}
+                    </div>
+                    {a.kids && a.kids.length > 0 && (
+                      <div style={{ fontSize: 9, color: "#888", marginTop: 1 }}>
+                        {a.kids.join(", ")}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+
+              {!weekend && entry.note && (
+                <div style={{ fontSize: 8, color: "#AAA", marginTop: 1, fontStyle: "italic" }}>
+                  {entry.note}
+                </div>
+              )}
+
               {weekend && entry.events && entry.events.map((ev, ei) => (
                 <div key={ei} style={{ fontSize: 9, color: "#7B5BAA", marginTop: 1 }}>
                   • {ev}
@@ -568,7 +645,7 @@ function PrintView({ year, month, schedule, paulaOut, taylorIn, caregivers, chil
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
           {caregivers.map(cg => {
             const assigned = Object.entries(schedule)
-              .filter(([, e]) => e.caregiverId === cg.id)
+              .filter(([, e]) => normalizeAssignments(e, children).some(a => a.caregiverId === cg.id))
               .map(([d]) => parseInt(d))
               .sort((a, b) => a - b);
 
@@ -584,10 +661,22 @@ function PrintView({ year, month, schedule, paulaOut, taylorIn, caregivers, chil
                   {assigned.length > 0 ? assigned.map(d => {
                     const e = schedule[d] || {};
                     const dow = DAYS[new Date(year, month, d).getDay()].slice(0, 2);
+                    const match = normalizeAssignments(e, children).find(a => a.caregiverId === cg.id);
 
                     return (
-                      <span key={d} style={{ display: "inline-block", marginRight: 5, marginBottom: 2, background: "#fff", borderRadius: 3, padding: "1px 5px", border: `1px solid ${cg.color}44` }}>
-                        {dow} {d}{e.kids && e.kids.length > 0 ? ` (${e.kids.join("+")})` : ""}
+                      <span
+                        key={d}
+                        style={{
+                          display: "inline-block",
+                          marginRight: 5,
+                          marginBottom: 2,
+                          background: "#fff",
+                          borderRadius: 3,
+                          padding: "1px 5px",
+                          border: `1px solid ${cg.color}44`
+                        }}
+                      >
+                        {dow} {d}{match && match.kids && match.kids.length > 0 ? ` (${match.kids.join("+")})` : ""}
                       </span>
                     );
                   }) : (
@@ -607,14 +696,92 @@ function PrintView({ year, month, schedule, paulaOut, taylorIn, caregivers, chil
   );
 }
 
-function WeekdayModal({ day, month, year, entry, caregivers, children, isPaulaOut, isTaylorIn, onUpdate, onTogglePaula, onToggleTaylor, onClear, onClose }) {
+function WeekdayModal({
+  day, month, year, entry, caregivers, children,
+  isPaulaOut, isTaylorIn,
+  onUpdate, onTogglePaula, onToggleTaylor,
+  onClear, onClose
+}) {
   const [note, setNote] = useState(entry.note || "");
-  const [kids, setKids] = useState(entry.kids || []);
+  const [assignments, setAssignments] = useState(normalizeAssignments(entry, children));
 
-  const toggleKid = (kid) => {
-    const u = kids.includes(kid) ? kids.filter(k => k !== kid) : [...kids, kid];
-    setKids(u);
-    onUpdate("kids", u);
+  const persistAssignments = (updated) => {
+    const cleaned = updated
+      .map(a => ({
+        caregiverId: a.caregiverId || "",
+        kids: Array.isArray(a.kids) ? [...new Set(a.kids.filter(Boolean))] : []
+      }))
+      .filter(a => a.caregiverId || a.kids.length > 0);
+
+    setAssignments(cleaned);
+    onUpdate("assignments", cleaned);
+  };
+
+  const caregiverUsedElsewhere = (caregiverId, currentIndex) => {
+    return assignments.some((a, i) => i !== currentIndex && a.caregiverId === caregiverId);
+  };
+
+  const hasTwoAssignments = assignments.length >= 2;
+
+  const addAssignment = () => {
+    if (hasTwoAssignments) return;
+
+    let updated = [...assignments];
+
+    if (updated.length === 1 && updated[0].kids.length > 1) {
+      updated = [{ ...updated[0], kids: [updated[0].kids[0]] }];
+    }
+
+    const usedKids = uniqueKidsFromAssignments(updated);
+    const availableKids = children.filter(k => !usedKids.includes(k));
+
+    updated.push({
+      caregiverId: "",
+      kids: availableKids.length > 0 ? [availableKids[0]] : []
+    });
+
+    persistAssignments(updated);
+  };
+
+  const removeAssignment = (index) => {
+    const updated = assignments.filter((_, i) => i !== index);
+    persistAssignments(updated);
+  };
+
+  const updateCaregiver = (index, caregiverId) => {
+    const updated = assignments.map((a, i) =>
+      i === index ? { ...a, caregiverId } : a
+    );
+    persistAssignments(updated);
+  };
+
+  const toggleKid = (index, kid) => {
+    const current = assignments[index];
+    const currentKids = current.kids || [];
+    const otherAssignments = assignments.filter((_, i) => i !== index);
+    const kidsUsedElsewhere = uniqueKidsFromAssignments(otherAssignments);
+    const updated = [...assignments];
+
+    if (assignments.length >= 2) {
+      if (kidsUsedElsewhere.includes(kid)) return;
+      updated[index] = { ...current, kids: currentKids.includes(kid) ? [] : [kid] };
+      persistAssignments(updated);
+      return;
+    }
+
+    const hasKid = currentKids.includes(kid);
+    const nextKids = hasKid
+      ? currentKids.filter(k => k !== kid)
+      : [...currentKids, kid];
+
+    updated[index] = { ...current, kids: nextKids };
+    persistAssignments(updated);
+  };
+
+  const getBlockedReason = (caregiver, index) => {
+    if (isPaulaOut && caregiver.name === "Paula") return "In Tampa";
+    if (caregiverUsedElsewhere(caregiver.id, index)) return "Already selected";
+    return "";
   };
 
   return (
@@ -625,72 +792,161 @@ function WeekdayModal({ day, month, year, entry, caregivers, children, isPaulaOu
         <Pill active={isTaylorIn} activeColor="#5B8CCC" activeBg="#EAF1FB" onClick={onToggleTaylor}>
           🏢 Taylor In Office{isTaylorIn ? " ✓" : ""}
         </Pill>
-
         <Pill active={isPaulaOut} activeColor="#A84444" activeBg="#FAEAEA" onClick={onTogglePaula}>
           ✈️ Paula in Tampa{isPaulaOut ? " ✓" : ""}
         </Pill>
       </div>
 
-      <Label>Assign Caregiver</Label>
+      <Label>Caregiver Assignments</Label>
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 16 }}>
-        {caregivers.map(c => {
-          const blocked = isPaulaOut && c.name === "Paula";
+      <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 16 }}>
+        {assignments.map((assignment, index) => (
+          <div key={index} style={{ border: "1.5px solid #E8E2DA", borderRadius: 10, padding: 10, background: "#FAFAFA" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+              <div style={{ fontSize: 12, fontWeight: "bold", color: "#555" }}>
+                Assignment {index + 1}
+              </div>
+              <button
+                onClick={() => removeAssignment(index)}
+                style={{ background: "none", border: "none", color: "#AAA", cursor: "pointer", fontSize: 18 }}
+              >
+                ×
+              </button>
+            </div>
 
-          return (
-            <button
-              key={c.id}
-              onClick={() => !blocked && onUpdate("caregiverId", entry.caregiverId === c.id ? null : c.id)}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 10,
-                padding: "8px 12px",
-                border: `2px solid ${entry.caregiverId === c.id ? c.color : "#E8E2DA"}`,
-                borderRadius: 9,
-                background: blocked ? "#F5F5F5" : entry.caregiverId === c.id ? c.light : "#FAFAFA",
-                cursor: blocked ? "not-allowed" : "pointer",
-                textAlign: "left",
-                opacity: blocked ? 0.5 : 1
-              }}
-            >
-              <div style={{ width: 10, height: 10, borderRadius: "50%", background: c.color, flexShrink: 0 }} />
-              <span style={{ fontSize: 13, fontWeight: entry.caregiverId === c.id ? "bold" : "normal", color: "#333" }}>
-                {c.name}
-              </span>
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 10, letterSpacing: 2, color: "#AAA", textTransform: "uppercase", marginBottom: 6 }}>
+                Caregiver
+              </div>
 
-              {blocked && <span style={{ marginLeft: "auto", fontSize: 10, color: "#C97B7B" }}>In Tampa</span>}
-              {!blocked && entry.caregiverId === c.id && <span style={{ marginLeft: "auto", fontSize: 11, color: c.color }}>✓</span>}
-            </button>
-          );
-        })}
-      </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {caregivers.map(c => {
+                  const blockedReason = getBlockedReason(c, index);
+                  const blocked = blockedReason !== "";
+                  const selected = assignment.caregiverId === c.id;
 
-      <Label>Children Covered</Label>
+                  return (
+                    <button
+                      key={c.id}
+                      onClick={() => !blocked && updateCaregiver(index, c.id)}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 10,
+                        padding: "8px 12px",
+                        border: `2px solid ${selected ? c.color : "#E8E2DA"}`,
+                        borderRadius: 9,
+                        background: blocked && !selected ? "#F5F5F5" : selected ? c.light : "#FFF",
+                        cursor: blocked && !selected ? "not-allowed" : "pointer",
+                        textAlign: "left",
+                        opacity: blocked && !selected ? 0.5 : 1
+                      }}
+                    >
+                      <div style={{ width: 10, height: 10, borderRadius: "50%", background: c.color, flexShrink: 0 }} />
+                      <span style={{ fontSize: 13, fontWeight: selected ? "bold" : "normal", color: "#333" }}>
+                        {c.name}
+                      </span>
+                      {blockedReason && !selected && (
+                        <span style={{ marginLeft: "auto", fontSize: 10, color: blockedReason === "In Tampa" ? "#C97B7B" : "#999" }}>
+                          {blockedReason}
+                        </span>
+                      )}
+                      {selected && (
+                        <span style={{ marginLeft: "auto", fontSize: 11, color: c.color }}>✓</span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
 
-      <div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginBottom: 16 }}>
-        {children.map(kid => (
-          <button
-            key={kid}
-            onClick={() => toggleKid(kid)}
-            style={{
-              padding: "5px 13px",
-              borderRadius: 20,
-              border: `1.5px solid ${kids.includes(kid) ? "#7EB8D4" : "#DDD"}`,
-              background: kids.includes(kid) ? "#E6F4FA" : "#FAFAFA",
-              cursor: "pointer",
-              fontSize: 13,
-              color: kids.includes(kid) ? "#3A8FAD" : "#888",
-              fontWeight: kids.includes(kid) ? "bold" : "normal"
-            }}
-          >
-            {kid}
-          </button>
+            <div>
+              <div style={{ fontSize: 10, letterSpacing: 2, color: "#AAA", textTransform: "uppercase", marginBottom: 6 }}>
+                Children Covered
+              </div>
+
+              <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
+                {children.map(kid => {
+                  const usedElsewhere = assignments.some((a, i) => i !== index && (a.kids || []).includes(kid));
+                  const selected = (assignment.kids || []).includes(kid);
+
+                  return (
+                    <button
+                      key={kid}
+                      onClick={() => !usedElsewhere && toggleKid(index, kid)}
+                      style={{
+                        padding: "5px 13px",
+                        borderRadius: 20,
+                        border: `1.5px solid ${selected ? "#7EB8D4" : "#DDD"}`,
+                        background: selected ? "#E6F4FA" : "#FAFAFA",
+                        cursor: usedElsewhere ? "not-allowed" : "pointer",
+                        fontSize: 13,
+                        color: selected ? "#3A8FAD" : "#888",
+                        fontWeight: selected ? "bold" : "normal",
+                        opacity: usedElsewhere ? 0.5 : 1
+                      }}
+                    >
+                      {kid}{usedElsewhere ? " • Taken" : ""}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {assignments.length === 1 && (
+                <div style={{ fontSize: 10, color: "#999", marginTop: 7 }}>
+                  One caregiver can cover one or both kids.
+                </div>
+              )}
+
+              {assignments.length === 2 && (
+                <div style={{ fontSize: 10, color: "#999", marginTop: 7 }}>
+                  With two caregivers, each caregiver can cover one child.
+                </div>
+              )}
+            </div>
+          </div>
         ))}
       </div>
 
-      <Label>Notes</Label>
+      {assignments.length < 2 && (
+        <button
+          onClick={addAssignment}
+          style={{
+            width: "100%",
+            padding: "9px",
+            border: "1.5px dashed #BBB",
+            borderRadius: 8,
+            background: "#FFF",
+            cursor: "pointer",
+            fontSize: 13,
+            color: "#666",
+            marginBottom: 16
+          }}
+        >
+          + Add Second Caregiver
+        </button>
+      )}
 
+      {assignments.length === 0 && (
+        <button
+          onClick={() => persistAssignments([{ caregiverId: "", kids: [] }])}
+          style={{
+            width: "100%",
+            padding: "9px",
+            border: "1.5px dashed #BBB",
+            borderRadius: 8,
+            background: "#FFF",
+            cursor: "pointer",
+            fontSize: 13,
+            color: "#666",
+            marginBottom: 16
+          }}
+        >
+          + Add Caregiver
+        </button>
+      )}
+
+      <Label>Notes</Label>
       <textarea
         value={note}
         onChange={e => setNote(e.target.value)}
@@ -724,16 +980,16 @@ function WeekendModal({ day, month, year, entry, onUpdate, onClear, onClose }) {
 
   const addEvent = () => {
     if (!newEvent.trim()) return;
-    const u = [...events, newEvent.trim()];
-    setEvents(u);
-    onUpdate("events", u);
+    const updated = [...events, newEvent.trim()];
+    setEvents(updated);
+    onUpdate("events", updated);
     setNewEvent("");
   };
 
   const removeEvent = (i) => {
-    const u = events.filter((_, ei) => ei !== i);
-    setEvents(u);
-    onUpdate("events", u);
+    const updated = events.filter((_, ei) => ei !== i);
+    setEvents(updated);
+    onUpdate("events", updated);
   };
 
   return (
@@ -754,7 +1010,6 @@ function WeekendModal({ day, month, year, entry, onUpdate, onClear, onClose }) {
           placeholder="e.g. Birthday party, Grocery run..."
           style={{ flex: 1, border: "1.5px solid #D4C8EE", borderRadius: 8, padding: "7px 10px", fontSize: 13, fontFamily: "Georgia,serif", outline: "none" }}
         />
-
         <button
           onClick={addEvent}
           style={{ padding: "7px 13px", border: "none", borderRadius: 8, background: "#9B7EC8", color: "#fff", cursor: "pointer", fontSize: 16, fontWeight: "bold" }}
@@ -777,7 +1032,6 @@ function WeekendModal({ day, month, year, entry, onUpdate, onClear, onClose }) {
       )}
 
       <Label>Notes</Label>
-
       <textarea
         value={note}
         onChange={e => setNote(e.target.value)}
@@ -809,8 +1063,15 @@ function SettingsModal({ caregivers, children, onSaveCaregivers, onSaveChildren,
   const [kids, setKids] = useState([...children]);
 
   const save = () => {
-    onSaveCaregivers(cgs);
-    onSaveChildren(kids);
+    const cleanedCaregivers = cgs.map(c => ({
+      ...c,
+      name: (c.name || "").trim() || "Unnamed"
+    }));
+
+    const cleanedKids = kids.map(k => (k || "").trim()).filter(Boolean);
+
+    onSaveCaregivers(cleanedCaregivers);
+    onSaveChildren(cleanedKids.length > 0 ? cleanedKids : CHILDREN_DEFAULT);
     onClose();
   };
 
@@ -824,16 +1085,15 @@ function SettingsModal({ caregivers, children, onSaveCaregivers, onSaveChildren,
       </div>
 
       <Label>Caregiver Names</Label>
-
       {cgs.map((cg, i) => (
         <div key={cg.id} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
           <div style={{ width: 10, height: 10, borderRadius: "50%", background: cg.color, flexShrink: 0 }} />
           <input
             value={cg.name}
             onChange={e => {
-              const u = [...cgs];
-              u[i] = { ...cg, name: e.target.value };
-              setCgs(u);
+              const updated = [...cgs];
+              updated[i] = { ...cg, name: e.target.value };
+              setCgs(updated);
             }}
             style={{ flex: 1, border: "1.5px solid #E8E2DA", borderRadius: 8, padding: "7px 10px", fontSize: 14, fontFamily: "Georgia,serif", outline: "none" }}
           />
@@ -841,15 +1101,14 @@ function SettingsModal({ caregivers, children, onSaveCaregivers, onSaveChildren,
       ))}
 
       <Label style={{ marginTop: 14 }}>Children&apos;s Names</Label>
-
       {kids.map((kid, i) => (
         <div key={i} style={{ marginBottom: 8 }}>
           <input
             value={kid}
             onChange={e => {
-              const u = [...kids];
-              u[i] = e.target.value;
-              setKids(u);
+              const updated = [...kids];
+              updated[i] = e.target.value;
+              setKids(updated);
             }}
             style={{ width: "100%", border: "1.5px solid #E8E2DA", borderRadius: 8, padding: "7px 10px", fontSize: 14, fontFamily: "Georgia,serif", outline: "none", boxSizing: "border-box" }}
           />
@@ -943,3 +1202,4 @@ ReactDOM.render(<App />, document.getElementById("root"));
 </script>
 </body>
 </html>
+  
