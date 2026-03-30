@@ -162,12 +162,27 @@ function App() {
     save("schedules", mk, { days: updated });
   };
 
-  const clearDay = (day) => {
-    const updated = { ...schedule };
-    delete updated[day];
-    setSchedule(updated);
-    save("schedules", mk, { days: updated });
-  };
+  const clearDay = async (day) => {
+  const updatedSchedule = { ...schedule };
+  delete updatedSchedule[day];
+  setSchedule(updatedSchedule);
+
+  const updatedPaulaOut = { ...paulaOut };
+  delete updatedPaulaOut[day];
+  setPaulaOut(updatedPaulaOut);
+
+  const updatedTaylorIn = { ...taylorIn };
+  delete updatedTaylorIn[day];
+  setTaylorIn(updatedTaylorIn);
+
+  try {
+    await db.collection("schedules").doc(mk).set({ days: updatedSchedule });
+    await db.collection("paulaOut").doc(mk).set({ days: updatedPaulaOut });
+    await db.collection("taylorIn").doc(mk).set({ days: updatedTaylorIn });
+  } catch (e) {
+    console.error(e);
+  }
+};
 
   const togglePaula = (day) => {
     const updated = { ...paulaOut, [day]: !paulaOut[day] };
