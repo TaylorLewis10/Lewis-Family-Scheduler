@@ -37,13 +37,13 @@ firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 
 const CAREGIVERS_DEFAULT = [
-  { id: "c1", name: "Gina",  color: "#E8A87C", light: "#FDF0E6" },
-  { id: "c2", name: "Paula", color: "#85C1A3", light: "#E8F5EE" },
+  { id: "c1", name: "Gina", color: "#E8A87C", light: "#FDF0E6" },
+  { id: "c2", name: "Grandma", color: "#85C1A3", light: "#E8F5EE" },
   { id: "c3", name: "Vicki", color: "#7EB8D4", light: "#E6F4FA" },
 ];
 
 const CHILDREN_DEFAULT = ["Henry", "Charles"];
-const DAYS   = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+const DAYS = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 
 function getDaysInMonth(y, m) {
@@ -73,7 +73,6 @@ function normalizeAssignments(entry, childrenList) {
       .filter(a => a.caregiverId || a.kids.length > 0);
   }
 
-  // Backward compatibility with old data
   if (entry.caregiverId) {
     let legacyKids = Array.isArray(entry.kids) ? entry.kids.filter(Boolean) : [];
     if (legacyKids.length === 0 && Array.isArray(childrenList) && childrenList.length > 0) {
@@ -317,7 +316,7 @@ function App() {
         <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
           <div style={{ width: 9, height: 9, borderRadius: 2, background: "#C97B7B" }} />
           <span style={{ fontSize: 11, color: "#444" }}>
-            Paula in Tampa <span style={{ color: "#BBB" }}>({paulaDays}d)</span>
+            Stecklers in Tampa <span style={{ color: "#BBB" }}>({paulaDays}d)</span>
           </span>
         </div>
 
@@ -389,7 +388,8 @@ function App() {
                   borderRadius: 8,
                   padding: "6px 6px 5px",
                   cursor: "pointer",
-                  minHeight: 92,
+                  height: 120,
+                  overflow: "hidden",
                   transition: "transform 0.1s, box-shadow 0.1s",
                   boxShadow: "0 1px 3px rgba(0,0,0,0.04)"
                 }}
@@ -409,12 +409,12 @@ function App() {
 
                   <div style={{ display: "flex", gap: 2 }}>
                     {isTaylorIn && !weekend && <div style={{ width: 6, height: 6, borderRadius: 1, background: "#5B8CCC" }} />}
-                    {isPaulaOut && !weekend && <div style={{ width: 6, height: 6, borderRadius: 1, background: "#C97B7B" }} />}
+                    {isPaulaOut && <div style={{ width: 6, height: 6, borderRadius: 1, background: "#C97B7B" }} />}
                   </div>
                 </div>
 
                 {!weekend && assignments.length === 0 && (
-                  <div style={{ fontSize: 9, color: "#DDD" }}>—</div>
+                  <div style={{ fontSize: 8, color: "#DDD" }}>—</div>
                 )}
 
                 {!weekend && assignments.map((a, idx) => {
@@ -423,11 +423,11 @@ function App() {
 
                   return (
                     <div key={idx} style={{ marginTop: idx === 0 ? 0 : 4 }}>
-                      <div style={{ fontSize: 10, fontWeight: "bold", color: cg.color }}>
+                      <div style={{ fontSize: 9, fontWeight: "bold", color: cg.color, lineHeight: 1.15 }}>
                         {cg.name}
                       </div>
                       {a.kids && a.kids.length > 0 && (
-                        <div style={{ fontSize: 9, color: "#999", marginTop: 1 }}>
+                        <div style={{ fontSize: 8, color: "#999", marginTop: 1, lineHeight: 1.1 }}>
                           👦 {a.kids.join(", ")}
                         </div>
                       )}
@@ -435,22 +435,28 @@ function App() {
                   );
                 })}
 
-                {weekend && <div style={{ fontSize: 9, color: "#C8B8E8", fontStyle: "italic" }}>Weekend</div>}
+                {weekend && <div style={{ fontSize: 8, color: "#C8B8E8", fontStyle: "italic" }}>Weekend</div>}
+
+                {weekend && isPaulaOut && (
+                  <div style={{ fontSize: 8, color: "#C97B7B", marginTop: 2, fontWeight: "bold", lineHeight: 1.1 }}>
+                    📍 Stecklers in Tampa
+                  </div>
+                )}
 
                 {weekend && entry.events && entry.events.slice(0, 2).map((ev, ei) => (
-                  <div key={ei} style={{ fontSize: 9, color: "#7B5BAA", marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  <div key={ei} style={{ fontSize: 8, color: "#7B5BAA", marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", lineHeight: 1.1 }}>
                     • {ev}
                   </div>
                 ))}
 
                 {weekend && entry.events && entry.events.length > 2 && (
-                  <div style={{ fontSize: 9, color: "#BBB" }}>
+                  <div style={{ fontSize: 8, color: "#BBB", lineHeight: 1.1 }}>
                     +{entry.events.length - 2} more
                   </div>
                 )}
 
                 {!weekend && entry.note && (
-                  <div style={{ fontSize: 9, color: "#CCC", marginTop: 2, fontStyle: "italic", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  <div style={{ fontSize: 8, color: "#CCC", marginTop: 2, fontStyle: "italic", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", lineHeight: 1.1 }}>
                     📝 {entry.note}
                   </div>
                 )}
@@ -469,6 +475,8 @@ function App() {
             month={month}
             year={year}
             entry={schedule[modal.day] || {}}
+            isStecklersTampa={!!paulaOut[modal.day]}
+            onToggleStecklers={() => togglePaula(modal.day)}
             onUpdate={(f, v) => updateDay(modal.day, f, v)}
             onClear={() => {
               clearDay(modal.day);
@@ -515,7 +523,7 @@ function PrintView({ year, month, schedule, paulaOut, taylorIn, caregivers, chil
   return (
     <div style={{ minHeight: "100vh", background: "#fff", padding: "24px 32px" }}>
       <div className="no-print" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 22 }}>
-        <div style={{ fontSize: 13, color: "#888" }}>Save as PDF → text to Gina, Paula & Vicki</div>
+        <div style={{ fontSize: 13, color: "#888" }}>Save as PDF → text to Gina, Grandma & Vicki</div>
         <div style={{ display: "flex", gap: 10 }}>
           <button onClick={onClose} style={{ padding: "7px 16px", border: "1.5px solid #DDD", borderRadius: 8, background: "#fff", cursor: "pointer", fontSize: 13, color: "#888" }}>
             ← Back
@@ -550,7 +558,7 @@ function PrintView({ year, month, schedule, paulaOut, taylorIn, caregivers, chil
 
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <div style={{ width: 12, height: 12, borderRadius: 3, background: "#FAE0E0", border: "1px solid #C97B7B" }} />
-          <span style={{ fontSize: 12 }}>Paula in Tampa</span>
+          <span style={{ fontSize: 12 }}>Stecklers in Tampa</span>
         </div>
       </div>
 
@@ -592,7 +600,7 @@ function PrintView({ year, month, schedule, paulaOut, taylorIn, caregivers, chil
                       T
                     </div>
                   )}
-                  {!!paulaOut[day] && !weekend && (
+                  {!!paulaOut[day] && (
                     <div style={{ fontSize: 8, background: "#FAE0E0", color: "#A84444", borderRadius: 2, padding: "1px 3px" }}>
                       ✈
                     </div>
@@ -620,6 +628,12 @@ function PrintView({ year, month, schedule, paulaOut, taylorIn, caregivers, chil
                   </div>
                 );
               })}
+
+              {weekend && !!paulaOut[day] && (
+                <div style={{ fontSize: 9, color: "#A84444", marginTop: 1, fontWeight: "bold" }}>
+                  Stecklers in Tampa
+                </div>
+              )}
 
               {!weekend && entry.note && (
                 <div style={{ fontSize: 8, color: "#AAA", marginTop: 1, fontStyle: "italic" }}>
@@ -779,7 +793,7 @@ function WeekdayModal({
   };
 
   const getBlockedReason = (caregiver, index) => {
-    if (isPaulaOut && caregiver.name === "Paula") return "In Tampa";
+    if (isPaulaOut && caregiver.name === "Grandma") return "In Tampa";
     if (caregiverUsedElsewhere(caregiver.id, index)) return "Already selected";
     return "";
   };
@@ -793,7 +807,7 @@ function WeekdayModal({
           🏢 Taylor In Office{isTaylorIn ? " ✓" : ""}
         </Pill>
         <Pill active={isPaulaOut} activeColor="#A84444" activeBg="#FAEAEA" onClick={onTogglePaula}>
-          ✈️ Paula in Tampa{isPaulaOut ? " ✓" : ""}
+          ✈️ Stecklers in Tampa{isPaulaOut ? " ✓" : ""}
         </Pill>
       </div>
 
@@ -973,7 +987,7 @@ function WeekdayModal({
   );
 }
 
-function WeekendModal({ day, month, year, entry, onUpdate, onClear, onClose }) {
+function WeekendModal({ day, month, year, entry, isStecklersTampa, onToggleStecklers, onUpdate, onClear, onClose }) {
   const [events, setEvents] = useState(entry.events || []);
   const [newEvent, setNewEvent] = useState("");
   const [note, setNote] = useState(entry.note || "");
@@ -998,6 +1012,12 @@ function WeekendModal({ day, month, year, entry, onUpdate, onClear, onClose }) {
 
       <div style={{ background: "#F3EEF9", borderRadius: 8, padding: "8px 12px", marginBottom: 16, fontSize: 12, color: "#9B7EC8" }}>
         🎉 Weekend — no caregiver coverage. Add family events below!
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+        <Pill active={isStecklersTampa} activeColor="#A84444" activeBg="#FAEAEA" onClick={onToggleStecklers}>
+          ✈️ Stecklers in Tampa{isStecklersTampa ? " ✓" : ""}
+        </Pill>
       </div>
 
       <Label>Events</Label>
@@ -1202,4 +1222,3 @@ ReactDOM.render(<App />, document.getElementById("root"));
 </script>
 </body>
 </html>
-  
